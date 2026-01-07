@@ -43,7 +43,6 @@ class ProjectMonitoringRun(BaseRunLoop):
         target_repos: list[str] | None = None,
         author: str = "",
         agent_name: str = "Agent",
-        linear_team: str | None = None,
     ):
         """Initialize project monitoring run.
 
@@ -53,7 +52,6 @@ class ProjectMonitoringRun(BaseRunLoop):
             target_repos: Specific repositories to monitor (owner/repo format)
             author: GitHub username for filtering (GitHub handle)
             agent_name: Name of the agent for prompts
-            linear_team: Linear team identifier for monitoring (e.g., "laurell-labs")
         """
         super().__init__(
             workspace=workspace,
@@ -66,7 +64,6 @@ class ProjectMonitoringRun(BaseRunLoop):
         self.target_repos = target_repos or []
         self.author = author
         self.agent_name = agent_name
-        self.linear_team = linear_team
         self.state_dir = workspace / "logs/.project-monitoring-state"
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
