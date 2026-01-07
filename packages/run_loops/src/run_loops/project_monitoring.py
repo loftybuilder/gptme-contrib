@@ -2,6 +2,7 @@
 
 import json
 import re
+import os
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -42,6 +43,7 @@ class ProjectMonitoringRun(BaseRunLoop):
         target_repos: list[str] | None = None,
         author: str = "",
         agent_name: str = "Agent",
+        linear_team: str | None = None,
     ):
         """Initialize project monitoring run.
 
@@ -51,6 +53,7 @@ class ProjectMonitoringRun(BaseRunLoop):
             target_repos: Specific repositories to monitor (owner/repo format)
             author: GitHub username for filtering (GitHub handle)
             agent_name: Name of the agent for prompts
+            linear_team: Linear team identifier for monitoring (e.g., "laurell-labs")
         """
         super().__init__(
             workspace=workspace,
@@ -63,6 +66,7 @@ class ProjectMonitoringRun(BaseRunLoop):
         self.target_repos = target_repos or []
         self.author = author
         self.agent_name = agent_name
+        self.linear_team = linear_team
         self.state_dir = workspace / "logs/.project-monitoring-state"
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -148,7 +152,7 @@ class ProjectMonitoringRun(BaseRunLoop):
 
                 org_repos = [
                     line.strip()
-                    for line in result.stdout.strip().split("\n")
+                    for line in result.stdout.strip().split('\n')
                     if line.strip()
                 ]
                 self.logger.info(f"Found {len(org_repos)} repositories in {org}")
@@ -292,7 +296,7 @@ class ProjectMonitoringRun(BaseRunLoop):
             if state_file.exists():
                 prev_failures = [
                     int(line.strip())
-                    for line in state_file.read_text().strip().split("\n")
+                    for line in state_file.read_text().strip().split('\n')
                     if line.strip()
                 ]
 
@@ -316,7 +320,7 @@ class ProjectMonitoringRun(BaseRunLoop):
                         )
 
             # Update state file
-            state_file.write_text("\n".join(str(n) for n in current_failures))
+            state_file.write_text('\n'.join(str(n) for n in current_failures))
 
         except Exception as e:
             self.logger.error(f"Error checking CI in {repo}: {e}")
@@ -568,7 +572,7 @@ class ProjectMonitoringRun(BaseRunLoop):
             if state_file.exists():
                 prev_issues = [
                     int(line.strip())
-                    for line in state_file.read_text().strip().split("\n")
+                    for line in state_file.read_text().strip().split('\n')
                     if line.strip()
                 ]
 
@@ -592,7 +596,7 @@ class ProjectMonitoringRun(BaseRunLoop):
                     )
 
             # Update state file
-            state_file.write_text("\n".join(str(n) for n in current_issues))
+            state_file.write_text('\n'.join(str(n) for n in current_issues))
 
         except Exception as e:
             self.logger.error(f"Error checking issues in {repo}: {e}")
@@ -633,7 +637,7 @@ class ProjectMonitoringRun(BaseRunLoop):
             # Read previous notifications
             prev_notifications = set()
             if state_file.exists():
-                prev_notifications = set(state_file.read_text().strip().split("\n"))
+                prev_notifications = set(state_file.read_text().strip().split('\n'))
 
             current_notifications = set()
 
@@ -682,10 +686,127 @@ class ProjectMonitoringRun(BaseRunLoop):
                 )
 
             # Save current notifications
-            state_file.write_text("\n".join(current_notifications))
+            state_file.write_text('\n'.join(current_notifications))
 
         except Exception as e:
             self.logger.error(f"Error checking notifications: {e}")
+
+        return work_items
+
+    def check_linear_issues(self) -> list[WorkItem]:
+        """Check Linear for mentions and assignments.
+
+        Uses the workspace's Python Linear tool to query unread notifications.
+        Queries all mentions and assignments across all teams.
+
+        Returns:
+            List of WorkItem for relevant Linear notifications
+        """
+
+        work_items = []
+        state_file = self.state_dir / "linear-notifications.state"
+
+        try:
+            # Path to Linear tool in workspace
+            linear_tool = self.workspace / "scripts/linear/linear_notifications.py"
+            
+            if not linear_tool.exists():
+                self.logger.warning(f"Linear tool not found at {linear_tool}")
+                return []
+
+            # Check for mentions and assignments from last 24 hours
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(linear_tool),
+                    "mentions",
+                    "--since", "24_hours_ago",
+                    "--json"
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "LINEAR_API_KEY": os.environ.get("LINEAR_API_KEY", "")},
+            )
+
+            notifications = []
+            if result.returncode == 0 and result.stdout.strip():
+                notifications = json.loads(result.stdout)
+
+            # Also check assignments
+            assign_result = subprocess.run(
+                [
+                    "python3",
+                    str(linear_tool),
+                    "assignments",
+                    "--since", "24_hours_ago",
+                    "--json"
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "LINEAR_API_KEY": os.environ.get("LINEAR_API_KEY", "")},
+            )
+
+            if assign_result.returncode == 0 and assign_result.stdout.strip():
+                assignments = json.loads(assign_result.stdout)
+                notifications.extend(assignments)
+
+            # Read previous notifications
+            prev_notifs = set()
+            if state_file.exists():
+                prev_notifs = set(state_file.read_text().strip().split('\n'))
+
+            current_notifs = set()
+
+            for notif in notifications:
+                notif_id = notif.get("id")
+                if not notif_id:
+                    continue
+
+                current_notifs.add(notif_id)
+
+                # Skip if already processed
+                if notif_id in prev_notifs:
+                    continue
+
+                # Get issue details
+                issue = notif.get("issue", {})
+                if not issue:
+                    continue
+
+                identifier = issue.get("identifier", "???")
+                title = issue.get("title", "No title")
+                url = issue.get("url", "")
+                notif_type = notif.get("type", "notification")
+
+                # Extract number from identifier (e.g., "SUDO-3" -> 3)
+                try:
+                    number = int(identifier.split('-')[1])
+                except (IndexError, ValueError):
+                    number = 0
+
+                work_items.append(
+                    WorkItem(
+                        repo=f"linear:{issue.get('team', {}).get('key', 'LINEAR')}",
+                        item_type="linear_mention" if "mention" in notif_type.lower() else "linear_assignment",
+                        number=number,
+                        title=title,
+                        url=url,
+                        details=f"{identifier}: {title}",
+                    )
+                )
+
+            # Update state file
+            if current_notifs:
+                state_file.write_text('\n'.join(sorted(current_notifs)))
+
+        except subprocess.TimeoutExpired:
+            self.logger.error("Linear tool timed out")
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Failed to parse Linear output: {e}")
+        except Exception as e:
+            self.logger.error(f"Error checking Linear: {e}")
 
         return work_items
 
@@ -701,6 +822,11 @@ class ProjectMonitoringRun(BaseRunLoop):
         self.logger.info("Checking notifications...")
         notification_work = self.check_notifications()
         all_work.extend(notification_work)
+
+        # Check Linear notifications (all unread)
+        self.logger.info("Checking Linear notifications...")
+        linear_work = self.check_linear_issues()
+        all_work.extend(linear_work)
 
         repos = self.discover_repositories()
 

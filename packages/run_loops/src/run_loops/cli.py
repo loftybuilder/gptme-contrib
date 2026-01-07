@@ -74,12 +74,18 @@ def email(workspace: Path):
     default=os.environ.get("AGENT_NAME", "Agent"),
     help="Agent name for prompts (default: $AGENT_NAME env var or 'Agent')",
 )
+@click.option(
+    "--linear-team",
+    default=os.environ.get("LINEAR_TEAM", ""),
+    help="Linear team identifier for monitoring (default: $LINEAR_TEAM env var)",
+)
 def monitoring(
     workspace: Path,
     orgs: tuple[str, ...],
     repos: tuple[str, ...],
     author: str,
     agent_name: str,
+    linear_team: str,
 ):
     """Run project monitoring loop."""
     run = ProjectMonitoringRun(
@@ -88,6 +94,7 @@ def monitoring(
         target_repos=list(repos) if repos else None,
         author=author,
         agent_name=agent_name,
+        linear_team=linear_team if linear_team else None,
     )
     exit_code = run.run()
     sys.exit(exit_code)
