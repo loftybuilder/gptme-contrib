@@ -631,6 +631,31 @@ class ProjectMonitoringRun(BaseRunLoop):
                 if n.get("reason") in relevant_reasons and n.get("unread", False)
             ]
 
+            # Mark relevant notifications as read BEFORE processing
+            # This prevents duplicate work if next check happens before processing finishes
+            if relevant_notifications:
+                self.logger.info(
+                    f"Marking {len(relevant_notifications)} notifications as read"
+                )
+                mark_read_result = subprocess.run(
+                    [
+                        "gh",
+                        "api",
+                        "--method",
+                        "PUT",
+                        "notifications",
+                        "-f",
+                        f"last_read_at={datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')}",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if mark_read_result.returncode != 0:
+                    self.logger.warning(
+                        f"Failed to mark notifications as read: {mark_read_result.stderr}"
+                    )
+
             # Read previous notifications
             prev_notifications = set()
             if state_file.exists():
