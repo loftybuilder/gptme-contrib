@@ -63,6 +63,11 @@ def execute_gptme(
         cmd = [gptme_path]
         if non_interactive:
             cmd.append("--non-interactive")
+        
+        # Add model from environment variable if set
+        model = os.environ.get("GPTME_MODEL")
+        if model:
+            cmd.extend(["--model", model])
 
         # this line is essential for the prompt file path to not be mistaken for a command
         cmd.append("'Here is the prompt to follow:'")
