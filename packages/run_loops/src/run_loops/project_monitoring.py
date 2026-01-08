@@ -715,123 +715,6 @@ class ProjectMonitoringRun(BaseRunLoop):
 
         return work_items
 
-    def check_linear_issues(self) -> list[WorkItem]:
-        """Check Linear for mentions and assignments.
-
-        Uses the workspace's Python Linear tool to query unread notifications.
-        Queries all mentions and assignments across all teams.
-
-        Returns:
-            List of WorkItem for relevant Linear notifications
-        """
-
-        work_items = []
-        state_file = self.state_dir / "linear-notifications.state"
-
-        try:
-            # Path to Linear tool in workspace
-            linear_tool = self.workspace / "scripts/linear/linear_notifications.py"
-            
-            if not linear_tool.exists():
-                self.logger.warning(f"Linear tool not found at {linear_tool}")
-                return []
-
-            # Check for mentions and assignments from last 24 hours
-            result = subprocess.run(
-                [
-                    "python3",
-                    str(linear_tool),
-                    "mentions",
-                    "--since", "24_hours_ago",
-                    "--json"
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                env={**os.environ, "LINEAR_API_KEY": os.environ.get("LINEAR_API_KEY", "")},
-            )
-
-            notifications = []
-            if result.returncode == 0 and result.stdout.strip():
-                notifications = json.loads(result.stdout)
-
-            # Also check assignments
-            assign_result = subprocess.run(
-                [
-                    "python3",
-                    str(linear_tool),
-                    "assignments",
-                    "--since", "24_hours_ago",
-                    "--json"
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                env={**os.environ, "LINEAR_API_KEY": os.environ.get("LINEAR_API_KEY", "")},
-            )
-
-            if assign_result.returncode == 0 and assign_result.stdout.strip():
-                assignments = json.loads(assign_result.stdout)
-                notifications.extend(assignments)
-
-            # Read previous notifications
-            prev_notifs = set()
-            if state_file.exists():
-                prev_notifs = set(state_file.read_text().strip().split('\n'))
-
-            current_notifs = set()
-
-            for notif in notifications:
-                notif_id = notif.get("id")
-                if not notif_id:
-                    continue
-
-                current_notifs.add(notif_id)
-
-                # Skip if already processed
-                if notif_id in prev_notifs:
-                    continue
-
-                # Get issue details
-                issue = notif.get("issue", {})
-                if not issue:
-                    continue
-
-                identifier = issue.get("identifier", "???")
-                title = issue.get("title", "No title")
-                url = issue.get("url", "")
-                notif_type = notif.get("type", "notification")
-
-                # Extract number from identifier (e.g., "SUDO-3" -> 3)
-                try:
-                    number = int(identifier.split('-')[1])
-                except (IndexError, ValueError):
-                    number = 0
-
-                work_items.append(
-                    WorkItem(
-                        repo=f"linear:{issue.get('team', {}).get('key', 'LINEAR')}",
-                        item_type="linear_mention" if "mention" in notif_type.lower() else "linear_assignment",
-                        number=number,
-                        title=title,
-                        url=url,
-                        details=f"{identifier}: {title}",
-                    )
-                )
-
-            # Update state file
-            if current_notifs:
-                state_file.write_text('\n'.join(sorted(current_notifs)))
-
-        except subprocess.TimeoutExpired:
-            self.logger.error("Linear tool timed out")
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse Linear output: {e}")
-        except Exception as e:
-            self.logger.error(f"Error checking Linear: {e}")
-
-        return work_items
-
     def discover_work(self) -> list[WorkItem]:
         """Discover all work items across repositories.
 
@@ -844,11 +727,6 @@ class ProjectMonitoringRun(BaseRunLoop):
         self.logger.info("Checking notifications...")
         notification_work = self.check_notifications()
         all_work.extend(notification_work)
-
-        # Check Linear notifications (all unread)
-        self.logger.info("Checking Linear notifications...")
-        linear_work = self.check_linear_issues()
-        all_work.extend(linear_work)
 
         repos = self.discover_repositories()
 
