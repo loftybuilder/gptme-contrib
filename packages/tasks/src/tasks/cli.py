@@ -2098,7 +2098,9 @@ def sync(update, output_json):
             issue_state = fetch_linear_issue_state(issue_info["identifier"])
             error_msg = "Could not fetch issue state from Linear"
         else:
-            issue_state = fetch_github_issue_state(issue_info["repo"], issue_info["number"])
+            issue_state = fetch_github_issue_state(
+                issue_info["repo"], issue_info["number"]
+            )
             error_msg = "Could not fetch issue state from GitHub"
 
         if issue_state is None:
@@ -2117,7 +2119,14 @@ def sync(update, output_json):
         # Determine expected task state based on issue state
         # GitHub uses OPEN/CLOSED, Linear uses state types (completed, canceled, started, etc.)
         is_closed = issue_state in ["CLOSED", "completed", "canceled"]
-        is_open = issue_state in ["OPEN", "started", "triage", "backlog", "unstarted", "in_progress"]
+        is_open = issue_state in [
+            "OPEN",
+            "started",
+            "triage",
+            "backlog",
+            "unstarted",
+            "in_progress",
+        ]
 
         expected_state = "done" if is_closed else (task.state or "active")
         if is_open and task.state == "done":
@@ -2208,19 +2217,33 @@ def parse_tracking_ref(ref: str) -> Optional[Dict[str, str]]:
     Returns dict with 'source' ('github' or 'linear'), plus source-specific fields.
     """
     # GitHub full URL format
-    github_url_match = re.match(r"https://github\.com/([^/]+/[^/]+)/(issues|pull)/(\d+)", ref)
+    github_url_match = re.match(
+        r"https://github\.com/([^/]+/[^/]+)/(issues|pull)/(\d+)", ref
+    )
     if github_url_match:
-        return {"source": "github", "repo": github_url_match.group(1), "number": github_url_match.group(3)}
+        return {
+            "source": "github",
+            "repo": github_url_match.group(1),
+            "number": github_url_match.group(3),
+        }
 
     # GitHub short format: owner/repo#123
     github_short_match = re.match(r"([^/]+/[^#]+)#(\d+)", ref)
     if github_short_match:
-        return {"source": "github", "repo": github_short_match.group(1), "number": github_short_match.group(2)}
+        return {
+            "source": "github",
+            "repo": github_short_match.group(1),
+            "number": github_short_match.group(2),
+        }
 
     # Linear URL format: https://linear.app/team/issue/IDENTIFIER
     linear_match = re.match(r"https://linear\.app/([^/]+)/issue/([^/]+)", ref)
     if linear_match:
-        return {"source": "linear", "team": linear_match.group(1), "identifier": linear_match.group(2)}
+        return {
+            "source": "linear",
+            "team": linear_match.group(1),
+            "identifier": linear_match.group(2),
+        }
 
     return None
 
@@ -2287,24 +2310,6 @@ def fetch_linear_issue_state(identifier: str) -> Optional[str]:
     if not token:
         return None
 
-    query = """
-    query($identifier: String!) {
-        issue(id: $identifier) {
-            state { type }
-        }
-    }
-    """
-
-    # Linear identifiers like SUDO-123 need to be looked up differently
-    # Try issueViaIdOrKey first
-    query = """
-    query($id: String!) {
-        issueViaIdentifier: issue(id: $id) {
-            state { type }
-        }
-    }
-    """
-
     try:
         import urllib.request
 
@@ -2321,10 +2326,12 @@ def fetch_linear_issue_state(identifier: str) -> Optional[str]:
 
         req = urllib.request.Request(
             "https://api.linear.app/graphql",
-            data=json.dumps({
-                "query": search_query,
-                "variables": {"filter": {"identifier": {"eq": identifier}}}
-            }).encode(),
+            data=json.dumps(
+                {
+                    "query": search_query,
+                    "variables": {"filter": {"identifier": {"eq": identifier}}},
+                }
+            ).encode(),
             headers={
                 "Content-Type": "application/json",
                 "Authorization": token,
@@ -2586,7 +2593,9 @@ def plan(task_id: str, output_json: bool):
     is_flag=True,
     help="Output as JSON for machine consumption",
 )
-def import_issues(source, repo, team, state, label, assignee, limit, dry_run, output_json):
+def import_issues(
+    source, repo, team, state, label, assignee, limit, dry_run, output_json
+):
     """Import issues from GitHub or Linear as placeholder tasks.
 
     Creates minimal task files with tracking frontmatter linking back
@@ -2644,7 +2653,11 @@ def import_issues(source, repo, team, state, label, assignee, limit, dry_run, ou
 
     if not issues:
         if output_json:
-            print(json.dumps({"imported": [], "count": 0, "message": "No issues found"}, indent=2))
+            print(
+                json.dumps(
+                    {"imported": [], "count": 0, "message": "No issues found"}, indent=2
+                )
+            )
             return
         console.print("[yellow]No issues found matching criteria[/]")
         return
@@ -2657,11 +2670,13 @@ def import_issues(source, repo, team, state, label, assignee, limit, dry_run, ou
 
         # Check for duplicates
         if tracking_ref in existing_tracking:
-            skipped.append({
-                "title": issue["title"],
-                "tracking_ref": tracking_ref,
-                "reason": "Already exists in tasks",
-            })
+            skipped.append(
+                {
+                    "title": issue["title"],
+                    "tracking_ref": tracking_ref,
+                    "reason": "Already exists in tasks",
+                }
+            )
             continue
 
         # Generate task filename
@@ -2670,11 +2685,13 @@ def import_issues(source, repo, team, state, label, assignee, limit, dry_run, ou
 
         # Skip if file already exists (belt and suspenders)
         if task_path.exists():
-            skipped.append({
-                "title": issue["title"],
-                "tracking_ref": tracking_ref,
-                "reason": f"File {task_filename} already exists",
-            })
+            skipped.append(
+                {
+                    "title": issue["title"],
+                    "tracking_ref": tracking_ref,
+                    "reason": f"File {task_filename} already exists",
+                }
+            )
             continue
 
         # Map priority from labels if available
@@ -2684,28 +2701,34 @@ def import_issues(source, repo, team, state, label, assignee, limit, dry_run, ou
         task_content = generate_task_content(issue, source, priority)
 
         if dry_run:
-            imported.append({
-                "title": issue["title"],
-                "tracking_ref": tracking_ref,
-                "filename": task_filename,
-                "dry_run": True,
-            })
+            imported.append(
+                {
+                    "title": issue["title"],
+                    "tracking_ref": tracking_ref,
+                    "filename": task_filename,
+                    "dry_run": True,
+                }
+            )
         else:
             # Create the task file
             try:
                 task_path.write_text(task_content)
-                imported.append({
-                    "title": issue["title"],
-                    "tracking_ref": tracking_ref,
-                    "filename": task_filename,
-                    "created": True,
-                })
+                imported.append(
+                    {
+                        "title": issue["title"],
+                        "tracking_ref": tracking_ref,
+                        "filename": task_filename,
+                        "created": True,
+                    }
+                )
             except Exception as e:
-                skipped.append({
-                    "title": issue["title"],
-                    "tracking_ref": tracking_ref,
-                    "reason": f"Failed to create file: {e}",
-                })
+                skipped.append(
+                    {
+                        "title": issue["title"],
+                        "tracking_ref": tracking_ref,
+                        "reason": f"Failed to create file: {e}",
+                    }
+                )
 
     # Output results
     if output_json:
@@ -2725,7 +2748,9 @@ def import_issues(source, repo, team, state, label, assignee, limit, dry_run, ou
         console.print("[bold yellow]DRY RUN[/] - No files created\n")
 
     if imported:
-        table = Table(title=f"[bold]{'Would Import' if dry_run else 'Imported'} ({len(imported)} issues)[/]")
+        table = Table(
+            title=f"[bold]{'Would Import' if dry_run else 'Imported'} ({len(imported)} issues)[/]"
+        )
         table.add_column("Title", style="cyan", max_width=50)
         table.add_column("Tracking", style="blue")
         table.add_column("Filename", style="green")
@@ -2744,11 +2769,15 @@ def import_issues(source, repo, team, state, label, assignee, limit, dry_run, ou
             console.print(f"  - {item['title'][:40]}: {item['reason']}")
 
     if not dry_run and imported:
-        console.print(f"\n[green]✓ Created {len(imported)} task files in {tasks_dir}[/]")
+        console.print(
+            f"\n[green]✓ Created {len(imported)} task files in {tasks_dir}[/]"
+        )
         console.print("[dim]Run 'tasks.py sync' to keep states synchronized[/]")
 
 
-def fetch_github_issues(repo: str, state: str, labels: List[str], assignee: Optional[str], limit: int) -> List[Dict[str, Any]]:
+def fetch_github_issues(
+    repo: str, state: str, labels: List[str], assignee: Optional[str], limit: int
+) -> List[Dict[str, Any]]:
     """Fetch issues from GitHub using gh CLI.
 
     Args:
@@ -2762,10 +2791,15 @@ def fetch_github_issues(repo: str, state: str, labels: List[str], assignee: Opti
         List of issue dicts with keys: number, title, state, labels, url, body, tracking_ref, source
     """
     cmd = [
-        "gh", "issue", "list",
-        "--repo", repo,
-        "--limit", str(limit),
-        "--json", "number,title,state,labels,url,body",
+        "gh",
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--limit",
+        str(limit),
+        "--json",
+        "number,title,state,labels,url,body",
     ]
 
     if state != "all":
@@ -2785,16 +2819,18 @@ def fetch_github_issues(repo: str, state: str, labels: List[str], assignee: Opti
         issues_data = json.loads(result.stdout)
         issues = []
         for issue in issues_data:
-            issues.append({
-                "number": issue["number"],
-                "title": issue["title"],
-                "state": issue["state"].lower(),
-                "labels": [l["name"] for l in issue.get("labels", [])],
-                "url": issue["url"],
-                "body": issue.get("body", "")[:500] if issue.get("body") else "",
-                "tracking_ref": issue["url"],  # Use full URL, same as Linear
-                "source": "github",
-            })
+            issues.append(
+                {
+                    "number": issue["number"],
+                    "title": issue["title"],
+                    "state": issue["state"].lower(),
+                    "labels": [label["name"] for label in issue.get("labels", [])],
+                    "url": issue["url"],
+                    "body": issue.get("body", "")[:500] if issue.get("body") else "",
+                    "tracking_ref": issue["url"],  # Use full URL, same as Linear
+                    "source": "github",
+                }
+            )
         return issues
     except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
         return []
@@ -2872,16 +2908,23 @@ def fetch_linear_issues(team: str, state: str, limit: int) -> List[Dict[str, Any
 
         issues = []
         for issue in team_data.get("issues", {}).get("nodes", []):
-            issues.append({
-                "number": issue["identifier"],
-                "title": issue["title"],
-                "state": issue["state"]["type"] if issue.get("state") else "unknown",
-                "labels": [l["name"] for l in issue.get("labels", {}).get("nodes", [])],
-                "url": issue["url"],
-                "body": (issue.get("description") or "")[:500],
-                "tracking_ref": issue["url"],  # Use full URL for Linear
-                "source": "linear",
-            })
+            issues.append(
+                {
+                    "number": issue["identifier"],
+                    "title": issue["title"],
+                    "state": issue["state"]["type"]
+                    if issue.get("state")
+                    else "unknown",
+                    "labels": [
+                        label["name"]
+                        for label in issue.get("labels", {}).get("nodes", [])
+                    ],
+                    "url": issue["url"],
+                    "body": (issue.get("description") or "")[:500],
+                    "tracking_ref": issue["url"],  # Use full URL for Linear
+                    "source": "linear",
+                }
+            )
         return issues
     except Exception:
         return []
@@ -2890,8 +2933,8 @@ def fetch_linear_issues(team: str, state: str, limit: int) -> List[Dict[str, Any
 def generate_task_filename(title: str, number: Union[str, int], source: str) -> str:
     """Generate a task filename from title and number."""
     # Sanitize title for filename
-    safe_title = re.sub(r'[^\w\s-]', '', title.lower())
-    safe_title = re.sub(r'[-\s]+', '-', safe_title).strip('-')
+    safe_title = re.sub(r"[^\w\s-]", "", title.lower())
+    safe_title = re.sub(r"[-\s]+", "-", safe_title).strip("-")
     safe_title = safe_title[:50]  # Limit length
 
     if source == "linear":
@@ -2903,9 +2946,12 @@ def generate_task_filename(title: str, number: Union[str, int], source: str) -> 
 
 def map_priority_from_labels(labels: List[str]) -> Optional[str]:
     """Map labels to task priority."""
-    labels_lower = [l.lower() for l in labels]
+    labels_lower = [label.lower() for label in labels]
 
-    if any(p in labels_lower for p in ["priority:high", "priority: high", "p0", "p1", "urgent", "critical"]):
+    if any(
+        p in labels_lower
+        for p in ["priority:high", "priority: high", "p0", "p1", "urgent", "critical"]
+    ):
         return "high"
     elif any(p in labels_lower for p in ["priority:medium", "priority: medium", "p2"]):
         return "medium"
@@ -2915,7 +2961,9 @@ def map_priority_from_labels(labels: List[str]) -> Optional[str]:
     return None
 
 
-def generate_task_content(issue: Dict[str, Any], source: str, priority: Optional[str]) -> str:
+def generate_task_content(
+    issue: Dict[str, Any], source: str, priority: Optional[str]
+) -> str:
     """Generate task file content from issue data."""
     # Map issue state to task state
     if issue["state"] in ["closed", "completed", "canceled"]:
@@ -2943,7 +2991,7 @@ def generate_task_content(issue: Dict[str, Any], source: str, priority: Optional
 
     # Add labels as tags (sanitized)
     for label in issue.get("labels", [])[:5]:  # Limit to 5 labels
-        safe_label = re.sub(r'[^\w-]', '-', label.lower()).strip('-')
+        safe_label = re.sub(r"[^\w-]", "-", label.lower()).strip("-")
         if safe_label and safe_label not in tags:
             tags.append(safe_label)
 
@@ -2962,19 +3010,23 @@ def generate_task_content(issue: Dict[str, Any], source: str, priority: Optional
     ]
 
     if issue.get("body"):
-        body_lines.extend([
-            "## Description",
-            "",
-            issue["body"],
-            "",
-        ])
+        body_lines.extend(
+            [
+                "## Description",
+                "",
+                issue["body"],
+                "",
+            ]
+        )
 
-    body_lines.extend([
-        "## Notes",
-        "",
-        "*Imported from external tracker. See source link for full context.*",
-        "",
-    ])
+    body_lines.extend(
+        [
+            "## Notes",
+            "",
+            "*Imported from external tracker. See source link for full context.*",
+            "",
+        ]
+    )
 
     return "\n".join(frontmatter_lines) + "\n".join(body_lines)
 
